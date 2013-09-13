@@ -237,7 +237,7 @@ CFLAGS += -Waggregate-return
 CFLAGS += -Wmissing-noreturn
 CFLAGS += -Wnested-externs
 #CFLAGS += -Wchar-subscripts (-Wall does this)
-CFLAGS += -Wmissing-prototypes
+#CFLAGS += -Wmissing-prototypes
 CFLAGS += -Wformat-security
 CFLAGS += -Wformat=2
 CFLAGS += -Wformat-nonliteral
@@ -246,7 +246,7 @@ CFLAGS += -Wswitch-default
 CFLAGS += -Wstrict-prototypes
 CFLAGS += -Wdeclaration-after-statement
 CFLAGS += -Wold-style-definition
-CFLAGS += -Wmissing-declarations
+#CFLAGS += -Wmissing-declarations
 CFLAGS += -Wmissing-include-dirs
 CFLAGS += -Wstrict-aliasing=2
 CFLAGS += -Wunsafe-loop-optimizations

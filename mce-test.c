@@ -1,7 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <errno.h>
 #include <unistd.h>
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include <glib.h>
 #include "mce-log.h"
@@ -11,6 +17,7 @@ static GMainLoop *mainloop;
 
 #define SENSORFW_SERVICE "com.nokia.SensorService"
 #define SENSORFW_PATH "/SensorManager"
+#define SENSOR_SOCKET "/var/run/sensord.sock"
 
 static gint32 als_sessionid;
 static gint32 prox_sessionid;
@@ -110,7 +117,52 @@ gboolean release_sensor(const char *id, gint32 sessionid)
 	return success;
 }
 
-void start_sensor(const char *id, const char *name, gint32 sessionid)
+gboolean connect_sensor_reader(gint32 sessionid, GIOFunc datafunc)
+{
+	int fd;
+	struct sockaddr_un sa;
+	socklen_t sa_len;
+	GIOChannel *channel;
+	char dummy;
+
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (!fd) {
+		mce_log(LL_ERR, "could not open local domain socket");
+		return FALSE;
+	}
+
+	memset(&sa, 0, sizeof(sa));
+	sa.sun_family = AF_UNIX;
+	strcpy(sa.sun_path, SENSOR_SOCKET);
+	/* This length calculation is specified by the unix(7) manpage */
+	sa_len = offsetof(struct sockaddr_un, sun_path) + strlen(sa.sun_path) + 1;
+	if (connect(fd, (struct sockaddr *) &sa, sa_len) < 0) {
+		mce_log(LL_ERR, "could not connect to %s: %s",
+			SENSOR_SOCKET, strerror(errno));
+		close(fd);
+		return FALSE;
+	}
+
+	if (write(fd, (char *) &sessionid, sizeof(sessionid))
+		!= sizeof(sessionid)) {
+		mce_log(LL_ERR, "could not initialize reader for session %d",
+			sessionid);
+		return FALSE;
+	}
+
+	if (read(fd, &dummy, 1) != 1) {
+		mce_log(LL_ERR, "could not get handshake for session %d",
+			sessionid);
+		return FALSE;
+	}
+	
+	channel = g_io_channel_unix_new(fd);
+	mce_log(LL_DEBUG, "adding watch for session %d fd %d", sessionid, fd);
+	g_io_add_watch(channel, G_IO_IN | G_IO_ERR | G_IO_HUP, datafunc, NULL);
+	return TRUE;
+}
+
+void start_sensor(const char *id, const char *name, gint32 sessionid, GIOFunc datafunc)
 {
 	DBusMessage *msg;
 	DBusError error;
@@ -126,17 +178,110 @@ void start_sensor(const char *id, const char *name, gint32 sessionid)
 	if (!msg)
 		mce_log(LL_ERR, "request to start sensor session %d failed", sessionid);
 	free(path);
+
+	connect_sensor_reader(sessionid, datafunc);
+}
+
+struct als_data {
+	guint64 timestamp; /* microseconds, monotonic */
+	unsigned value;
+};
+
+gboolean als_reader(GIOChannel *source, GIOCondition condition, gpointer user_data)
+{
+	unsigned count;
+	int fd;
+
+	if (condition & (G_IO_ERR | G_IO_HUP)) {
+		mce_log(LL_WARN, "ALS sensor feed closed");
+		return FALSE;
+	}
+
+	fd = g_io_channel_unix_get_fd(source);
+
+	// In real code there would be some kind of buffering here,
+	// but for this demonstration we just assume a whole packet
+	// is available at once. A packet is an element count followed
+	// by that many elements of struct als_data.
+
+	if (read(fd, &count, sizeof(count)) != sizeof(count)) {
+		mce_log(LL_WARN, "ALS sensor feed read error");
+		return FALSE;
+	}
+
+	mce_log(LL_DEBUG, "Got %u ALS values", count);
+
+	while (count--) {
+		struct als_data data;
+		if (read(fd, &data, sizeof(data)) != sizeof(data)) {
+			mce_log(LL_WARN, "ALS sensor feed format error");
+			return FALSE;
+		}
+
+		mce_log(LL_INFO, "Got ALS reading %u", data.value);
+	}
+
+	return TRUE;
+}
+
+struct prox_data {
+	guint64 timestamp; /* microseconds, monotonic */
+	unsigned value;
+	// This should be the size of a C++ bool on the same platform.
+	// Unfortunately there's no way to find out in a C program
+	char withinProximity;
+};
+
+// Basically the same as als_reader, except with struct prox_data
+gboolean prox_reader(GIOChannel *source, GIOCondition condition, gpointer user_data)
+{
+	unsigned count;
+	int fd;
+
+	if (condition & (G_IO_ERR | G_IO_HUP)) {
+		mce_log(LL_WARN, "Proximity sensor feed closed");
+		return FALSE;
+	}
+
+	fd = g_io_channel_unix_get_fd(source);
+
+	// In real code there would be some kind of buffering here,
+	// but for this demonstration we just assume a whole packet
+	// is available at once. A packet is an element count followed
+	// by that many elements of struct prox_data.
+
+	if (read(fd, &count, sizeof(count)) != sizeof(count)) {
+		mce_log(LL_WARN, "Proximity sensor feed read error");
+		return FALSE;
+	}
+
+	mce_log(LL_DEBUG, "Got %u proximity values", count);
+
+	while (count--) {
+		struct prox_data data;
+		if (read(fd, &data, sizeof(data)) != sizeof(data)) {
+			mce_log(LL_WARN, "Proximity sensor feed format error");
+			return FALSE;
+		}
+
+		mce_log(LL_INFO, "Got proximity reading %u (%d)",
+			data.value, data.withinProximity);
+	}
+
+	return TRUE;
 }
 
 void enable_sensors(void)
 {
 	if (load_sensor("alssensor")
 		&& request_sensor("alssensor", &als_sessionid)) {
-		start_sensor("alssensor", "local.ALSSensor", als_sessionid);
+		start_sensor("alssensor", "local.ALSSensor",
+			als_sessionid, als_reader);
 	}
 	if (load_sensor("proximitysensor")
 		&& request_sensor("proximitysensor", &prox_sessionid)) {
-		start_sensor("proximitysensor", "local.ProximitySensor", prox_sessionid);
+		start_sensor("proximitysensor", "local.ProximitySensor",
+			prox_sessionid, prox_reader);
 	}
 }
 
