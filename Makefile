@@ -322,8 +322,8 @@ mce : LDLIBS += -ldl
 endif
 mce : mce.o $(patsubst %.c,%.o,$(MCE_CORE))
 
-mce-test : CFLAGS += $(MCE_CFLAGS)
-mce-test : LDLIBS += $(MCE_LDLIBS) -lrt
+mce-test : CFLAGS += $(MCE_CFLAGS) -g
+mce-test : LDLIBS += $(MCE_LDLIBS) -lrt -g
 mce-test : mce-test.o mce-dbus.o mce-log.o builtin-gconf.o mce-io.o libwakelock.o
 
 # ----------------------------------------------------------------------------
