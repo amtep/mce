@@ -1,4 +1,4 @@
-Name:       mce
+Name:       mce-sensorfwtest
 Summary:    Mode Control Entity for Nokia mobile computers
 Version:    1.14.1
 Release:    1
@@ -41,56 +41,14 @@ the Mode Control Entity and to get mode information.
 %setup -q -n %{name}-%{version}
 
 %build
-./verify_version
-make %{?jobs:-j%jobs}
+make %{?jobs:-j%jobs} mce-test
 
 %install
 rm -rf %{buildroot}
 # FIXME: we need a configure script ... for now pass dirs in make install
-make install DESTDIR=%{buildroot} _UNITDIR=%{_unitdir}
-
-%preun
-if [ "$1" -eq 0 ]; then
-  systemctl stop %{name}.service
-fi
-
-%post
-systemctl daemon-reload
-systemctl reload-or-try-restart %{name}.service
-
-%postun
-systemctl daemon-reload
+mkdir -p %{buildroot}/%{_sbindir}
+cp mce-test %{buildroot}/%{_sbindir}/%{name}
 
 %files
 %defattr(-,root,root,-)
-%doc COPYING debian/changelog debian/copyright
-# binaries
 %{_sbindir}/%{name}
-%dir %{_libdir}/%{name}
-%dir %{_libdir}/%{name}/modules
-%{_libdir}/%{name}/modules/*.so
-# config
-%dir %config %{_sysconfdir}/%{name}
-%config %{_sysconfdir}/%{name}/10mce.ini
-%config %{_sysconfdir}/%{name}/20mce-radio-states.ini
-%config %{_sysconfdir}/%{name}/20hybris-led.ini
-# empty /var/lib/mce -> rpm
-%dir %{_localstatedir}/lib/%{name}/
-# NB empty /var/run/mce -> handled by systemd tmpfiles.d/mce.conf
-# manpages
-%{_mandir}/man8/%{name}.8.gz
-# dbus
-%config %{_sysconfdir}/dbus-1/system.d/mce.conf
-# systemd
-%config %{_sysconfdir}/tmpfiles.d/mce.conf
-/lib/systemd/system/%{name}.service
-/lib/systemd/system/multi-user.target.wants/%{name}.service
-
-%files tools
-%defattr(-,root,root,-)
-%doc COPYING debian/copyright
-%{_sbindir}/mcetool
-%{_sbindir}/evdev_trace
-%{_sbindir}/mcetorture
-%{_mandir}/man8/mcetool.8.gz
-%{_mandir}/man8/mcetorture.8.gz

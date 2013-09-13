@@ -141,7 +141,7 @@ TESTSDIR   := tests
 MODULE_DIR := modules
 
 # Binaries to build
-TARGETS += mce
+TARGETS += mce-test
 
 # Plugins to build
 MODULES += $(MODULE_DIR)/radiostates.so
@@ -321,6 +321,10 @@ ifeq ($(ENABLE_HYBRIS),y)
 mce : LDLIBS += -ldl
 endif
 mce : mce.o $(patsubst %.c,%.o,$(MCE_CORE))
+
+mce-test : CFLAGS += $(MCE_CFLAGS)
+mce-test : LDLIBS += $(MCE_LDLIBS) -lrt
+mce-test : mce-test.o mce-dbus.o mce-log.o builtin-gconf.o mce-io.o libwakelock.o
 
 # ----------------------------------------------------------------------------
 # MODULES
